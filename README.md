@@ -4,40 +4,60 @@ A [C# .NET](https://msdn.microsoft.com/en-us/vstudio/aa496123.aspx) client for t
 
 This Apcera supported client parallels the [NATS GO Client](https://github.com/nats-io/nats).
 
-[![License MIT](https://img.shields.io/npm/l/express.svg)](http://opensource.org/licenses/MIT)
-[![API Documentation](https://img.shields.io/badge/doc-Doxygen-brightgreen.svg?style=flat)](http://nats-io.github.io/csnats)
+[![License MIT](https://img.shields.io/badge/License-MIT-blue.svg)](http://opensource.org/licenses/MIT)
+[![Build status](https://ci.appveyor.com/api/projects/status/9f2jy1g9qngra3b5?svg=true)](https://ci.appveyor.com/project/NATS-CI47222/csnats)
+[![API Documentation](https://img.shields.io/badge/doc-Doxygen-brightgreen.svg?style=flat)](http://nats-io.github.io/csharp-nats)
+[![NuGet](https://img.shields.io/nuget/v/NATS.Client.svg?maxAge=2592000)](https://www.nuget.org/packages/NATS.Client)
 
 ## Installation
 
 First, download the source code:
 ```
-git clone git@github.com:nats-io/csnats.git .
+git clone git@github.com:nats-io/csharp-nats.git
 ```
 
 ### Quick Start
 
-Ensure you have installed the .NET Framework 4.0 or greater.  Set your path to include csc.exe, e.g.
+
+Then, build the assembly.  
+
+For both .NET 4.5 and .NET core, there are simple batch files.  These will build the respective NATS.Client.dll and the provided examples with only requiring the  .NET framework SDK/Platform
+
+#### .NET 4.5
+Ensure you have installed the .NET Framework 4.5.1 or greater.
 ```
 set PATH=C:\Windows\Microsoft.NET\Framework64\v4.0.30319;%PATH%
 ```
-Then, build the assembly.  There is a simple batch file, build.bat, that will build the assembly (NATS.Client.dll) and the provided examples with only requriing the  .NET framework SDK.
-
+To build simply call:
 ```
-build.bat
+build45.bat
 ```
 The batch file will create a bin directory, and copy all binary files, including samples, into it.
+#### .NET core
+
+To build .NET core, you will need version 1.0.0-preview2-003121 or higher, found here:
+https://www.microsoft.com/net/core#windows
+
+```
+buildcore.bat
+```
+
+This will build the .NET core (standard1.6) NATS.Client assembly.  To run the examples, ``cd`` into the directory of the example you wish to run, and use the `dotnet run` command.  e.g.
+```
+cd examples\Publish
+dotnet run
+```
 
 ### Visual Studio
 
-The recommended alternative is to load NATS.sln into Visual Studio 2013 Express or better.  Later versions of Visual Studio should automatically upgrade the solution and project files for you.  XML documenation is generated, so code completion, context help, etc, will be available in the editor.
-
+The recommended alternative is to load `NATSnet45.sln` or `NATSCore.sln` into Visual Studio 2015 to build the version you need.  XML documentation is generated, so code completion, context help, etc, will be available in the editor.  If building .NET core, ensure you have the latest .NET core support for Visual Studio.  Information about that can be found [here](https://blogs.msdn.microsoft.com/visualstudio/2016/06/27/visual-studio-2015-update-3-and-net-core-1-0-available-now/).
 
 #### Project files
 
 The NATS Visual Studio Solution contains several projects, listed below.
 
 * NATS - The NATS.Client assembly
-* NATSUnitTests - Visual Studio Unit Tests (ensure you have gnatds.exe in your path for these).
+* NATSUnitTests - Visual Studio Unit Tests (ensure you have gnatds.exe in your path to run these).
 * Publish Subscribe
   * Publish - A sample publisher.
   * Subscribe - A sample subscriber.
@@ -62,7 +82,7 @@ build_doc.bat
 Doxygen will build the NATS .NET Client API documentation, placing it in the `documentation\NATS.Client\html` directory.
 Doxygen is required to be installed and in the PATH.  Version 1.8 is known to work.
 
-[Current API Documentation](http://nats-io.github.io/csnats)
+[Current API Documentation](http://nats-io.github.io/csharp-nats)
 
 ## Basic Usage
 
@@ -72,7 +92,7 @@ NATS .NET C# Client uses interfaces to reference most NATS client objects, and d
 
 First, reference the NATS.Client assembly so you can use it in your code.  Be sure to add a reference in your project or if compiling via command line, compile with the /r:NATS.Client.DLL parameter.  While the NATS client is written in C#, any .NET langage can use it.
 
-Below is some code demonstrating basic API usage.  Note that this is example code, not functional as a whole (e.g. requests will fail without a subscriber to reply). 
+Below is some code demonstrating basic API usage.  Note that this is example code, not functional as a whole (e.g. requests will fail without a subscriber to reply).
 
 ```C#
 using System;
@@ -95,7 +115,7 @@ Here are example snippets of using the API to create a connection, subscribe, pu
             // Creates a live connection to the default
             // NATS Server running locally
             IConnection c = cf.CreateConnection();
-            
+
             // Setup an event handler to process incoming messages.
             // An anonymous delegate function is used for brevity.
             EventHandler<MsgHandlerEventArgs> h = (sender, args) =>
@@ -121,7 +141,7 @@ Here are example snippets of using the API to create a connection, subscribe, pu
             // arriving immediately.
             IAsyncSubscription s = c.SubscribeAsync("foo", h);
 
-            // Alternatively, create an asynchronous subscriber on subject foo, 
+            // Alternatively, create an asynchronous subscriber on subject foo,
             // assign a message handler, then start the subscriber.   When
             // multicasting delegates, this allows all message handlers
             // to be setup before messages start arriving.
@@ -156,17 +176,18 @@ Here are example snippets of using the API to create a connection, subscribe, pu
 ## Basic Encoded Usage
 The .NET NATS client mirrors go encoding through serialization and
 deserialization.  Simply create an encoded connection and publish
-objects, and receive objects through an asyncronous subscription using
-the encoded message event handler.  By default, objects are serialized
-using the BinaryFormatter, but methods used to serialize and deserialize
-objects can be overridden.
+objects, and receive objects through an asynchronous subscription using
+the encoded message event handler.  The .NET 4.5 client has a default formatter
+serializing objects using the BinaryFormatter, but methods used to serialize and deserialize
+objects can be overridden.  The NATS core version does not have serialization
+defaults and they must be specified.
 
 ```C#
         using (IEncodedConnection c = new ConnectionFactory().CreateEncodedConnection())
         {
             EventHandler<EncodedMessageEventArgs> eh = (sender, args) =>
             {
-                // Here, obj is an instance of the object published to 
+                // Here, obj is an instance of the object published to
                 // this subscriber.  Retrieve it through the
                 // ReceivedObject property of the arguments.
                 MyObject obj = (MyObject)args.ReceivedObject;
@@ -179,7 +200,7 @@ objects can be overridden.
 
             MyObject obj = new MyObject();
             obj.Company = "Apcera";
-            
+
             // To publish an instance of your object, simply
             // call the IEncodedConnection publish API and pass
             // your object.
@@ -189,10 +210,9 @@ objects can be overridden.
 ```
 
 ### Other Types of Serialization
-Optionally, one can override serialization.  Depending on the level of support or 
+Optionally, one can override serialization.  Depending on the level of support or
 third party packages used, objects can be serialized to JSON, SOAP, or a custom
-scheme.  XML was chosen as the example here as it is natively supported 
-in all versions of .NET.
+scheme.  XML was chosen as the example here as it is natively supported by .NET 4.5.
 
 ```C#
         // Example XML serialization.
@@ -215,17 +235,64 @@ in all versions of .NET.
             MemoryStream ms = new MemoryStream(data);
             return x.Deserialize(ms);
         }
-        
+
         <...>
-        
+
         // Create an encoded connection and override the OnSerialize and
         // OnDeserialize delegates.
         IEncodedConnection c = new ConnectionFactory().CreateEncodedConnection();
         c.OnDeserialize = deserializeFromXML;
         c.OnSerialize = serializeToXML;
-        
+
         // From here on, the connection will use the custom delegates
         // for serialization.
+```
+
+One can also use `Data Contract` to serialize objects.  Below are simple example
+ overrides that work with .NET core:
+```C#
+[DataContract]
+public class JsonObject
+{
+    [DataMember]
+    public string Value = "";
+}
+
+internal object jsonDeserializer(byte[] buffer)
+{
+    using (MemoryStream stream = new MemoryStream())
+    {
+        var serializer = new DataContractJsonSerializer(typeof(JsonObject));
+        stream.Write(buffer, 0, buffer.Length);
+        stream.Position = 0;
+        return serializer.ReadObject(stream);
+    }
+}
+
+internal byte[] jsonSerializer(object obj)
+{
+    if (obj == null)
+        return null;
+
+    var serializer = new DataContractJsonSerializer(typeof(JsonObject));
+
+    using (MemoryStream stream = new MemoryStream())
+    {
+        serializer.WriteObject(stream, obj);
+        return stream.ToArray();
+    }
+}
+
+<...>
+
+// Create an encoded connection and override the OnSerialize and
+// OnDeserialize delegates.
+IEncodedConnection c = new ConnectionFactory().CreateEncodedConnection();
+c.OnDeserialize = jsonDeserializer;
+c.OnSerialize = jsonSerializer;
+
+// From here on, the connection will use the custom delegates
+// for serialization.
 ```
 
 ## Wildcard Subscriptions
@@ -341,7 +408,7 @@ Setup a subscriber to auto-unsubscribe after ten messsages.
         {
            Console.WriteLine("Received: " + args.Message);
         };
-                
+
         s.Start();
         s.AutoUnsubscribe(10);
 ```
@@ -360,6 +427,12 @@ Other events can be assigned delegate methods through the options object.
                 Console.WriteLine("   Subject: " + args.Subscription.Subject);
             };
 
+            opts.ServerDiscoveredEventHandler += (sender, args) =>
+            {
+                Console.WriteLine("A new server has joined the cluster:");
+                Console.WriteLine("    " + String.Join(", ", args.Conn.DiscoveredServers));
+            };
+
             opts.ClosedEventHandler += (sender, args) =>
             {
                 Console.WriteLine("Connection Closed: ");
@@ -375,7 +448,32 @@ Other events can be assigned delegate methods through the options object.
             IConnection c = new ConnectionFactory().CreateConnection(opts);
 ```
 
+After version 0.5.0, the C# .NET client supports async Requests.
 
+```C#
+public async void MyRequestDataMethod(IConnection c)
+{
+    var m = await c.RequestAsync("foo", null);
+
+    ...
+    m = c.RequestAsync("foo", null);
+    // do some work
+    await m;
+
+    // cancellation tokens are supported.
+    var cts = new CancellationTokenSource();
+
+    var msg = c.RequestAsync("foo", null, cts.Token);
+    // do stuff
+    if (requestIsNowIrrevelant())
+        cts.Cancel();
+
+    await msg;
+    // be sure to handle OperationCancelled Exception.
+}
+```
+
+The NATS .NET client supports the cluster discovery protocol.  The list of servers known to a connection is automatically updated when a connection is established, and afterword in realtime as cluster changes occur.  A current list of known servers in a cluster can be obtained using the `IConnection.Servers` property; this list will be used if the client needs to reconnect to the cluster.
 
 ## Clustered Usage
 
@@ -390,23 +488,23 @@ Other events can be assigned delegate methods through the options object.
             opts.ReconnectWait = 1000;
             opts.NoRandomize = true;
             opts.Servers = servers;
-            
+
             IConnection c = new ConnectionFactory().CreateConnection(opts);
 ```
 
 ## TLS
 The NATS .NET client supports TLS 1.2.  Set the secure option, add
-the certificate, and connect.  Note that .NET requires both the 
+the certificate, and connect.  Note that .NET requires both the
 private key and certificate to be present in the same certificate file.
 
 ```C#
         Options opts = ConnectionFactory.GetDefaultOptions();
         opts.Secure = true;
-        
-        // .NET requires the private key and cert in the 
+
+        // .NET requires the private key and cert in the
         //  same file. 'client.pfx' is generated from:
         //
-        // openssl pkcs12 -export -out client.pfx 
+        // openssl pkcs12 -export -out client.pfx
         //    -inkey client-key.pem -in client-cert.pem
         X509Certificate2 cert = new X509Certificate2("client.pfx", "password");
 
@@ -414,12 +512,12 @@ private key and certificate to be present in the same certificate file.
 
         IConnection c = new ConnectionFactory().CreateConnection(opts);
 ```
-Many times, it is useful when developing an application (or necessary 
+Many times, it is useful when developing an application (or necessary
 when using self-signed certificates) to override server certificate
 validation.  This is achieved by overriding the remove certificate
 validation callback through the NATS client options.
 ```C#
-        
+
     private bool verifyServerCert(object sender,
         X509Certificate certificate, X509Chain chain,
                 SslPolicyErrors sslPolicyErrors)
@@ -430,14 +528,14 @@ validation callback through the NATS client options.
             // Do what is necessary to achieve the level of
             // security you need given a policy error.
         }        
-        
+
         <...>
-        
+
         Options opts = ConnectionFactory.GetDefaultOptions();
         opts.Secure = true;
         opts.TLSRemoteCertificationValidationCallback = verifyServerCert;
         opts.AddCertificate("client.pfx");
-        
+
         IConnection c = new ConnectionFactory().CreateConnection(opts);
 ```
 The NATS server default cipher suites **may not be supported** by the Microsoft
@@ -475,7 +573,7 @@ start /B /REALTIME benchmark.exe
 
 The benchmarks include:
 
-* PubOnly<size> - publish only 
+* PubOnly<size> - publish only
 * PubSub<size> - publish and subscribe
 * ReqReply<size> - request/reply
 * Lat<size> - latency.
@@ -518,13 +616,20 @@ Lat4k (us)	500 msgs, 291.09 avg, 99.70 min, 43679.10 max, 2047.67 stddev
 Lat8k (us)	500 msgs, 363.56 avg, 131.50 min, 39428.50 max, 1990.81 stddev
 ```
 
+## About the code and contributing
+
+A note:  The NATS C# .NET client was originally developed with the idea in mind that it would support the .NET 4.0 code base for increased adoption, and closely parallel the GO client (internally) for maintenance purposes.  So, some of the nice .NET APIs/features were intentionally left out.  While this has certainly paid off, after consideration, and some maturation of the NATS C# library, the NATS C# code will move toward more idiomatic .NET coding style where it makes sense.
+
+To that end, with any contributions, certainly feel free to code in a more .NET idiomatic style than what you see.  PRs are always welcome!
+
 ## TODO
 * [ ] Another performance pass - look at stream directly over socket, contention, fastpath optimizations, rw locks.
+* [ ] Rx API (unified over NATS Streaming?)
 * [ ] Expand Unit Tests to test internals (namely Parsing)
-* [ ] WCF bindings
-* [ ] Travis CI
+* [ ] WCF bindings (If requested for legacy, or user contributed)
+* [X] Travis CI (Used AppVeyor instead)
 * [ ] Allow configuration for performance tuning (buffer sizes), defaults based on plaform.
-* [ ] [.NET Core](https://github.com/dotnet/core) compatibility, TLS required.
+* [X] [.NET Core](https://github.com/dotnet/core) compatibility, TLS required.
 * [ ] Azure Service Bus Connector
 * [ ] Visual Studio [Starter Kit](https://msdn.microsoft.com/en-us/library/ccd9ychb.aspx)
 * [X] Convert unit tests to xunit
@@ -541,7 +646,7 @@ Any suggestions and/or contributions are welcome!
 
 (The MIT License)
 
-Copyright (c) 2012-2015 Apcera Inc.
+Copyright (c) 2012-2016 Apcera Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to
@@ -560,5 +665,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 IN THE SOFTWARE.
-
-

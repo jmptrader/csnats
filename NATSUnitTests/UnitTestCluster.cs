@@ -36,7 +36,7 @@ namespace NATSUnitTests
         {
             IConnection c = null;
             ConnectionFactory cf = new ConnectionFactory();
-            Options o = ConnectionFactory.GetDefaultOptions();
+            Options o = utils.DefaultTestOptions;
 
             o.NoRandomize = true;
 
@@ -71,7 +71,7 @@ namespace NATSUnitTests
 		        "nats://localhost:1224"
             };
 
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.NoRandomize = true;
             opts.Servers = plainServers;
             opts.Timeout = 5000;
@@ -103,7 +103,7 @@ namespace NATSUnitTests
 		        "nats://localhost:1224"
             };
 
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.MaxReconnect = 2;
             opts.ReconnectWait = 1000;
             opts.NoRandomize = true;
@@ -131,7 +131,7 @@ namespace NATSUnitTests
                 }
             };
 
-            opts.Timeout = 200;
+            opts.Timeout = 1000;
 
             using (NATSServer s1 = utils.CreateServerOnPort(1222),
                               s2 = utils.CreateServerOnPort(1224))
@@ -140,7 +140,6 @@ namespace NATSUnitTests
                 {
                     Stopwatch reconnectSw = new Stopwatch();
 
-                    System.Console.WriteLine("Connected to: " + c.ConnectedUrl);
                     lock (disconnectLock)
                     {
                         s1.Shutdown();
@@ -168,6 +167,54 @@ namespace NATSUnitTests
                     //   Assert.Fail("Reconnect time took to long: {0} millis.",
                     //        reconnectSw.ElapsedMilliseconds);
                     //}
+                }
+            }
+        }
+
+        [Fact]
+        public void TestServerDiscoveredHandler()
+        {
+            IConnection c = null;
+            ConnectionFactory cf = new ConnectionFactory();
+            Options o = utils.DefaultTestOptions;
+
+            o.NoRandomize = true;
+            o.Servers = testServers;
+
+            bool serverDiscoveredCalled = false;
+            o.ServerDiscoveredEventHandler += (sender, e) =>
+            {
+                serverDiscoveredCalled = true;
+            };
+
+            string seedServerArgs = @"-p 1222 -cluster nats://localhost:1333";
+            string secondClusterMemberArgs = @"-p 1223 -cluster nats://localhost:1334 -routes nats://localhost:1333";
+
+            // create the seed server for a cluster...
+            using (NATSServer ns1 = utils.CreateServerWithArgs(seedServerArgs))
+            {
+                // ...then connect to it...
+                using (c = cf.CreateConnection(o))
+                {
+                    Assert.True(testServers[0].Equals(c.ConnectedUrl));
+
+                    // ...then while connected, start up a second server...
+                    using (NATSServer ns2 = utils.CreateServerWithArgs(secondClusterMemberArgs))
+                    {
+                        // ...waiting up to 30 seconds for the second server to start...
+                        for (int ii = 0; ii < 6; ii++)
+                        {
+                            Thread.Sleep(5000);
+
+                            // ...taking an early out if we detected the startup...
+                            if (serverDiscoveredCalled)
+                                break;
+                        }
+
+                        // ...and by then we should have received notification of
+                        // its awakening.
+                        Assert.True(serverDiscoveredCalled);
+                    }
                 }
             }
         }
@@ -217,7 +264,7 @@ namespace NATSUnitTests
             int numClients = 10;
             SimClient[] clients = new SimClient[100];
 
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.Servers = testServers;
 
             NATSServer s1 = utils.CreateServerOnPort(1222);
@@ -268,7 +315,7 @@ namespace NATSUnitTests
         public void TestProperReconnectDelay()
         {
             Object mu = new Object();
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.Servers = testServers;
             opts.NoRandomize = true;
 
@@ -316,7 +363,7 @@ namespace NATSUnitTests
         [Fact]
         public void TestProperFalloutAfterMaxAttempts()
         {
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
 
             Object dmu = new Object();
             Object cmu = new Object();
@@ -376,7 +423,7 @@ namespace NATSUnitTests
         [Fact]
         public void TestProperFalloutAfterMaxAttemptsWithAuthMismatch()
         {
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
 
             Object dmu = new Object();
             Object cmu = new Object();
@@ -389,7 +436,7 @@ namespace NATSUnitTests
             opts.NoRandomize = true;
             opts.MaxReconnect = 2;
             opts.ReconnectWait = 25; // millis
-            opts.Timeout = 500;
+            opts.Timeout = 1000;
 
             bool disconnectHandlerCalled = false;
 
@@ -443,7 +490,7 @@ namespace NATSUnitTests
         [Fact]
         public void TestTimeoutOnNoServers()
         {
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             Object dmu = new Object();
             Object cmu = new Object();
 
@@ -515,7 +562,7 @@ namespace NATSUnitTests
             /// Work in progress
             int RECONNECTS = 4;
 
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             Object mu = new Object();
 
             opts.Servers = testServersShortList;

@@ -31,16 +31,11 @@ namespace NATSUnitTests
         }
 
         UnitTestUtilities utils = new UnitTestUtilities();
-        
-        public TestReconnect()
-        {
-            UnitTestUtilities.CleanupExistingServers();
-        }
 
         [Fact]
         public void TestReconnectDisallowedFlags()
         {
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.Url = "nats://localhost:22222";
             opts.AllowReconnect = false;
 
@@ -70,7 +65,7 @@ namespace NATSUnitTests
         [Fact]
         public void TestReconnectAllowedFlags()
         {
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.Url = "nats://localhost:22222";
             opts.MaxReconnect = 2;
             opts.ReconnectWait = 1000;
@@ -104,7 +99,7 @@ namespace NATSUnitTests
         [Fact]
         public void TestBasicReconnectFunctionality()
         {
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.Url = "nats://localhost:22222";
             opts.MaxReconnect = 2;
             opts.ReconnectWait = 1000;
@@ -122,7 +117,7 @@ namespace NATSUnitTests
 
             opts.ReconnectedEventHandler = (sender, args) =>
             {
-                System.Console.WriteLine("Reconnected");
+                // NOOP
             };
 
             NATSServer ns = utils.CreateServerOnPort(22222);
@@ -132,7 +127,6 @@ namespace NATSUnitTests
                 IAsyncSubscription s = c.SubscribeAsync("foo");
                 s.MessageHandler += (sender, args) =>
                 {
-                    System.Console.WriteLine("Received message.");
                     lock (msgLock)
                     {
                         Monitor.Pulse(msgLock);   
@@ -148,9 +142,8 @@ namespace NATSUnitTests
                     Assert.True(Monitor.Wait(testLock, 100000));
                 }
 
-                System.Console.WriteLine("Sending message.");
                 c.Publish("foo", Encoding.UTF8.GetBytes("Hello"));
-                System.Console.WriteLine("Done sending message.");
+
                 // restart the server.
                 using (ns = utils.CreateServerOnPort(22222))
                 {
@@ -172,26 +165,18 @@ namespace NATSUnitTests
         {
             Options opts = reconnectOptions;
 
-            Object disconnectedLock = new Object();
             Object msgLock = new Object();
-            Object reconnectedLock = new Object();
+            AutoResetEvent disconnectedEvent = new AutoResetEvent(false);
+            AutoResetEvent reconnectedEvent = new AutoResetEvent(false);
 
             opts.DisconnectedEventHandler = (sender, args) =>
             {
-                System.Console.WriteLine("Disconnected.");
-                lock (disconnectedLock)
-                {
-                    Monitor.Pulse(disconnectedLock);
-                }
+                disconnectedEvent.Set();
             };
 
             opts.ReconnectedEventHandler = (sender, args) =>
             {
-                System.Console.WriteLine("Reconnected.");
-                lock (reconnectedLock)
-                {
-                    Monitor.Pulse(reconnectedLock);
-                }
+                reconnectedEvent.Set();
             };
 
             byte[] payload = Encoding.UTF8.GetBytes("bar");
@@ -213,13 +198,10 @@ namespace NATSUnitTests
 	            c.Publish("foo", payload);
                 c.Flush();
 
-                lock(disconnectedLock)
-                {
-                    ns.Shutdown();
-                    // server is stopped here.
+                ns.Shutdown();
+                // server is stopped here.
 
-                    Assert.True(Monitor.Wait(disconnectedLock, 20000));
-                }
+                Assert.True(disconnectedEvent.WaitOne(20000));
 
                 // subscribe to bar while connected.
                 IAsyncSubscription s3 = c.SubscribeAsync("bar");
@@ -236,33 +218,23 @@ namespace NATSUnitTests
                 using (NATSServer ts = utils.CreateServerOnPort(22222))
                 {
                     // wait for reconnect
-                    lock (reconnectedLock)
-                    {
-                        Assert.True(Monitor.Wait(reconnectedLock, 60000));
-                    }
+                    Assert.True(reconnectedEvent.WaitOne(60000));
 
                     c.Publish("foobar", payload);
                     c.Publish("foo", payload);
 
                     using (IAsyncSubscription s4 = c.SubscribeAsync("done"))
                     {
-                        Object doneLock = new Object();
+                        AutoResetEvent doneEvent = new AutoResetEvent(false);
                         s4.MessageHandler += (sender, args) =>
                         {
-                            System.Console.WriteLine("Recieved done message.");
-                            lock (doneLock)
-                            {
-                                Monitor.Pulse(doneLock);
-                            }
+                            doneEvent.Set();
                         };
 
                         s4.Start();
 
-                        lock (doneLock)
-                        {
-                            c.Publish("done", payload);
-                            Assert.True(Monitor.Wait(doneLock, 2000));
-                        }
+                        c.Publish("done", payload);
+                        Assert.True(doneEvent.WaitOne(4000));
                     }
                 } // NATSServer
                 
@@ -273,8 +245,6 @@ namespace NATSUnitTests
         private void incrReceivedMessageHandler(object sender,
             MsgHandlerEventArgs args)
         {
-            System.Console.WriteLine("Received message on subject {0}.",
-                args.Message.Subject);
             Interlocked.Increment(ref received);
         }
 
@@ -294,22 +264,11 @@ namespace NATSUnitTests
             }
         }
 
-        [Serializable]
-        class NumberObj
-        {
-            public  NumberObj(int value)
-            {
-                v = value;
-            }
-
-            public int v;
-        }
-
-        void sendAndCheckMsgs(IEncodedConnection ec, string subject, int numToSend)
+        void sendAndCheckMsgs(IConnection ec, string subject, int numToSend)
         {
             for (int i = 0; i < numToSend; i++)
             {
-                ec.Publish(subject, new NumberObj(i));
+                ec.Publish(subject, Encoding.UTF8.GetBytes(Convert.ToString(i)));
             }
             ec.Flush();
 
@@ -321,28 +280,25 @@ namespace NATSUnitTests
         [Fact]
         public void TestQueueSubsOnReconnect()
         {
-            Object reconnectLock = new Object();
+            AutoResetEvent reconnectEvent = new AutoResetEvent(false);
             Options opts = reconnectOptions;
-            IEncodedConnection ec;
+            IConnection c;
 
             string subj = "foo.bar";
             string qgroup = "workers";
 
             opts.ReconnectedEventHandler += (sender, args) =>
             {
-                lock (reconnectLock)
-                {
-                    Monitor.Pulse(reconnectLock);
-                }
+                reconnectEvent.Set();
             };
 
             using(NATSServer ns = utils.CreateServerOnPort(22222))
             {
-                ec = new ConnectionFactory().CreateEncodedConnection(opts);
+                c = new ConnectionFactory().CreateConnection(opts);
 
-                EventHandler<EncodedMessageEventArgs> eh = (sender, args) =>
+                EventHandler<MsgHandlerEventArgs> eh = (sender, args) =>
                 {
-                    int seq = ((NumberObj)args.ReceivedObject).v;
+                    int seq = Convert.ToInt32(Encoding.UTF8.GetString(args.Message.Data));
 
                     lock (results)
                     {
@@ -352,35 +308,32 @@ namespace NATSUnitTests
                 };
 
                 // Create Queue Subscribers
-	            ec.SubscribeAsync(subj, qgroup, eh);
-                ec.SubscribeAsync(subj, qgroup, eh);
+	            c.SubscribeAsync(subj, qgroup, eh);
+                c.SubscribeAsync(subj, qgroup, eh);
 
-                ec.Flush();
+                c.Flush();
 
-                sendAndCheckMsgs(ec, subj, 10);
+                sendAndCheckMsgs(c, subj, 10);
             }
             // server should stop...
 
             // give the OS time to shut it down.
-            Thread.Sleep(500);
+            Thread.Sleep(1000);
 
             // start back up
             using (NATSServer ns = utils.CreateServerOnPort(22222))
             {
                 // wait for reconnect
-                lock (reconnectLock)
-                {
-                    Assert.True(Monitor.Wait(reconnectLock, 3000));
-                }
+                Assert.True(reconnectEvent.WaitOne(6000));
 
-                sendAndCheckMsgs(ec, subj, 10);
+                sendAndCheckMsgs(c, subj, 10);
             }
         }
 
         [Fact]
         public void TestClose()
         {
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.Url = "nats://localhost:22222";
             opts.AllowReconnect = true;
             opts.MaxReconnect = 60;
@@ -418,7 +371,7 @@ namespace NATSUnitTests
 
             IConnection c = null;
 
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.Url = "nats://localhost:22222";
             opts.AllowReconnect = true;
             opts.MaxReconnect = 10000;
@@ -491,7 +444,7 @@ namespace NATSUnitTests
             Object reconnectLock = new Object();
             bool   reconnected = false;
 
-            Options opts = ConnectionFactory.GetDefaultOptions();
+            Options opts = utils.DefaultTestOptions;
             opts.Verbose = true;
 
             opts.ReconnectedEventHandler += (sender, args) =>
@@ -524,6 +477,47 @@ namespace NATSUnitTests
             }
         }
 
+        [Fact]
+        public void TestPublishErrorsDuringReconnect()
+        {
+            AutoResetEvent connectedEv = new AutoResetEvent(false);
+            using (var server = new NATSServer())
+            {
+
+                Task t = new Task(() =>
+                {
+                    connectedEv.WaitOne(10000);
+
+                    Random r = new Random();
+
+                    // increase this count for a longer running test.
+                    for (int i = 0; i < 10; i++)
+                    {
+                        server.Bounce(r.Next(500));
+                    }
+                }, TaskCreationOptions.LongRunning);
+                t.Start();
+
+                byte[] payload = Encoding.UTF8.GetBytes("hello");
+                using (var c = utils.DefaultTestConnection)
+                {
+                    connectedEv.Set();
+
+                    while (t.IsCompleted == false)
+                    {
+                        try
+                        {
+                            c.Publish("foo", payload);
+                        }
+                        catch (Exception e)
+                        {
+                            Assert.IsNotType<NATSConnectionClosedException>(e);
+                            Assert.False(c.IsClosed());
+                        }
+                    }
+                }
+            }
+        }
     } // class
 
 } // namespace

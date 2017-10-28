@@ -25,10 +25,8 @@ namespace NATSUnitTests
         {
             try
             {
-                Console.WriteLine("Trying: " + url);
-
                 hitDisconnect = 0;
-                Options opts = ConnectionFactory.GetDefaultOptions();
+                Options opts = util.DefaultTestOptions;
                 opts.Url = url;
                 opts.DisconnectedEventHandler += handleDisconnect;
                 IConnection c = null;
@@ -52,6 +50,19 @@ namespace NATSUnitTests
             hitDisconnect++;
         }
 
+        private bool compareBytes(byte[] bs1, byte[] bs2)
+        {
+            if (bs1.Length == bs2.Length)
+                return false;
+
+            for (int i = bs1.Length; i < bs1.Length; i++)
+            {
+                if (bs1[i] != bs2[i])
+                    return false;
+            }
+
+            return true;
+        }
 
         // A hack to avoid issues with our test self signed cert.
         // We don't want to require the runner of the test to install the 
@@ -72,7 +83,12 @@ namespace NATSUnitTests
                     UnitTestUtilities.GetFullCertificatePath("server-cert.pem"));
 
             // UNSAFE hack for testing purposes.
-            if (serverCert.GetRawCertDataString().Equals(certificate.GetRawCertDataString()))
+#if NET45
+            var isOK = serverCert.GetRawCertDataString().Equals(certificate.GetRawCertDataString());
+#else
+            var isOK = serverCert.Issuer.Equals(certificate.Issuer);
+#endif
+            if (isOK)
                 return true;
 
             return false;
@@ -83,7 +99,7 @@ namespace NATSUnitTests
         {
             using (NATSServer srv = util.CreateServerWithConfig("tls_1222_verify.conf"))
             {
-                Options opts = ConnectionFactory.GetDefaultOptions();
+                Options opts = util.DefaultTestOptions;
                 opts.Secure = true;
                 opts.Url = "nats://localhost:1222";
                 opts.TLSRemoteCertificationValidationCallback = verifyServerCert;
@@ -105,7 +121,6 @@ namespace NATSUnitTests
                         c.Publish("foo", null);
                         c.Flush();
                         Msg m = s.NextMessage();
-                        Console.WriteLine("Received msg over TLS conn.");
                     }
                 }
             }
@@ -116,7 +131,7 @@ namespace NATSUnitTests
         {
             using (NATSServer srv = util.CreateServerWithConfig("tls_1222_verify.conf"))
             {
-                Options opts = ConnectionFactory.GetDefaultOptions();
+                Options opts = util.DefaultTestOptions;
                 opts.Secure = true;
                 opts.Url = "nats://localhost:1222";
                 opts.TLSRemoteCertificationValidationCallback = verifyServerCert;
@@ -134,7 +149,7 @@ namespace NATSUnitTests
         {
             using (NATSServer srv = util.CreateServerWithConfig("tls_1222_user.conf"))
             {
-                Options opts = ConnectionFactory.GetDefaultOptions();
+                Options opts = util.DefaultTestOptions;
                 opts.Secure = true;
                 opts.Url = "nats://username:BADDPASSOWRD@localhost:1222";
                 opts.TLSRemoteCertificationValidationCallback = verifyServerCert;
@@ -154,7 +169,7 @@ namespace NATSUnitTests
             {
                 // we can't call create secure connection w/ the certs setup as they are
                 // so we'll override the 
-                Options opts = ConnectionFactory.GetDefaultOptions();
+                Options opts = util.DefaultTestOptions;
                 opts.Secure = true;
                 opts.TLSRemoteCertificationValidationCallback = verifyServerCert;
                 opts.Url = "nats://localhost:1222";
@@ -166,7 +181,6 @@ namespace NATSUnitTests
                         c.Publish("foo", null);
                         c.Flush();
                         Msg m = s.NextMessage();
-                        Console.WriteLine("Received msg over TLS conn.");
                     }
                 }
             }
@@ -175,22 +189,21 @@ namespace NATSUnitTests
         [Fact]
         public void TestTlsReconnect()
         {
-            ConditionalObj reconnectedObj = new ConditionalObj();
+            AutoResetEvent ev = new AutoResetEvent(false);
 
             using (NATSServer srv = util.CreateServerWithConfig("tls_1222.conf"),
                    srv2 = util.CreateServerWithConfig("tls_1224.conf"))
             {
                 Thread.Sleep(1000);
 
-                Options opts = ConnectionFactory.GetDefaultOptions();
+                Options opts = util.DefaultTestOptions;
                 opts.Secure = true;
                 opts.NoRandomize = true;
                 opts.TLSRemoteCertificationValidationCallback = verifyServerCert;
                 opts.Servers = new string[]{ "nats://localhost:1222" , "nats://localhost:1224" };
                 opts.ReconnectedEventHandler += (sender, obj) =>
                 {
-                    Console.WriteLine("Reconnected.");
-                    reconnectedObj.notify();
+                    ev.Set();
                 };
 
                 using (IConnection c = new ConnectionFactory().CreateConnection(opts))
@@ -201,18 +214,16 @@ namespace NATSUnitTests
                         c.Publish("foo", null);
                         c.Flush();
                         s.NextMessage();
-                        Console.WriteLine("Received msg over TLS conn.");
 
                         // shutdown the server
                         srv.Shutdown();
 
                         // wait for reconnect
-                        reconnectedObj.wait(30000);
+                        Assert.True(ev.WaitOne(30000));
 
                         c.Publish("foo", null);
                         c.Flush();
                         s.NextMessage();
-                        Console.WriteLine("Received msg over TLS conn.");
                     }
                 }
             }
@@ -223,14 +234,14 @@ namespace NATSUnitTests
         [Fact]
         public void TestTlsReconnectAuthTimeout()
         {
-            ConditionalObj obj = new ConditionalObj();
+            AutoResetEvent ev = new AutoResetEvent(false);
 
             using (NATSServer s1 = util.CreateServerWithConfig("auth_tls_1222.conf"),
                               s2 = util.CreateServerWithConfig("auth_tls_1223_timeout.conf"),
                               s3 = util.CreateServerWithConfig("auth_tls_1224.conf"))
             {
 
-                Options opts = ConnectionFactory.GetDefaultOptions();
+                Options opts = util.DefaultTestOptions;
                 opts.Secure = true;
                 opts.NoRandomize = true;
                 opts.TLSRemoteCertificationValidationCallback = verifyServerCert;
@@ -242,8 +253,7 @@ namespace NATSUnitTests
 
                 opts.ReconnectedEventHandler += (sender, args) =>
                 {
-                    Console.WriteLine("Reconnected");
-                    obj.notify();
+                    ev.Set();
                 };
 
                 IConnection c = new ConnectionFactory().CreateConnection(opts);
@@ -252,20 +262,21 @@ namespace NATSUnitTests
                 // This should fail over to S2 where an authorization timeout occurs
                 // then successfully reconnect to S3.
 
-                obj.wait(20000);
+                Assert.True(ev.WaitOne(20000));
             }
         }
 
+#if NET45
         [Fact]
         public void TestTlsReconnectAuthTimeoutLateClose()
         {
-            ConditionalObj obj = new ConditionalObj();
+            AutoResetEvent ev = new AutoResetEvent(false);
 
             using (NATSServer s1 = util.CreateServerWithConfig("auth_tls_1222.conf"),
                               s2 = util.CreateServerWithConfig("auth_tls_1224.conf"))
             {
 
-                Options opts = ConnectionFactory.GetDefaultOptions();
+                Options opts = util.DefaultTestOptions;
                 opts.Secure = true;
                 opts.NoRandomize = true;
                 opts.TLSRemoteCertificationValidationCallback = verifyServerCert;
@@ -276,7 +287,7 @@ namespace NATSUnitTests
 
                 opts.ReconnectedEventHandler += (sender, args) =>
                 {
-                    obj.notify();
+                    ev.Set();
                 };
 
                 IConnection c = new ConnectionFactory().CreateConnection(opts);
@@ -302,8 +313,9 @@ namespace NATSUnitTests
                 s1.Shutdown();
 
                 // Wait for a reconnect.
-                obj.wait(20000);
+                Assert.True(ev.WaitOne(20000));
             }
         }
+#endif
     }
 }

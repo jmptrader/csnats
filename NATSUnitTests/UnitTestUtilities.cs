@@ -1,32 +1,59 @@
 ﻿// Copyright 2015 Apcera Inc. All rights reserved.
 
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Diagnostics;
-using System.Reflection;
 using System.IO;
-using Xunit;
+using NATS.Client;
+#if NET45
+using System.Reflection;
+#endif
 
 namespace NATSUnitTests
 {
     class NATSServer : IDisposable
     {
+#if NET45
+        static readonly string SERVEREXE = "gnatsd.exe";
+#else
+        static readonly string SERVEREXE = "gnatsd";
+#endif
         // Enable this for additional server debugging info.
-        bool debug = false;
+        static bool debug = false;
         Process p;
+        ProcessStartInfo psInfo;
 
-        public NATSServer()
+        internal static bool Debug
         {
-            ProcessStartInfo psInfo = createProcessStartInfo();
-            p = Process.Start(psInfo);
-            Thread.Sleep(500);
+            set { debug = value; }
+            get { return debug; }
         }
 
-        private void addArgument(ProcessStartInfo psInfo, string arg)
+        public NATSServer() : this(true) { }
+
+        public NATSServer(bool verify)
+        {
+            createProcessStartInfo();
+            p = Process.Start(psInfo);
+            if (verify)
+            {
+                for (int i = 0; i < 10; i++)
+                {
+                    try
+                    {
+                        var c = new ConnectionFactory().CreateConnection();
+                        c.Close();
+                        break;
+                    }
+                    catch
+                    {
+                        Thread.Sleep(i * 250);
+                    }
+                }
+            }
+        }
+
+        private void addArgument(string arg)
         {
             if (psInfo.Arguments == null)
             {
@@ -42,24 +69,24 @@ namespace NATSUnitTests
 
         public NATSServer(int port)
         {
-            ProcessStartInfo psInfo = createProcessStartInfo();
-
-            addArgument(psInfo, "-p " + port);
+            createProcessStartInfo();
+            addArgument("-p " + port);
 
             p = Process.Start(psInfo);
+            Thread.Sleep(500);
         }
 
         public NATSServer(string args)
         {
-            ProcessStartInfo psInfo = createProcessStartInfo();
-            addArgument(psInfo, args);
+            createProcessStartInfo();
+            addArgument(args);
             p = Process.Start(psInfo);
+            Thread.Sleep(500);
         }
 
-        private ProcessStartInfo createProcessStartInfo()
+        private void createProcessStartInfo()
         {
-            string gnatsd = Properties.Settings.Default.gnatsd;
-            ProcessStartInfo psInfo = new ProcessStartInfo(gnatsd);
+            psInfo = new ProcessStartInfo(SERVEREXE);
 
             if (debug)
             {
@@ -67,12 +94,22 @@ namespace NATSUnitTests
             }
             else
             {
+#if NET45
                 psInfo.WindowStyle = ProcessWindowStyle.Hidden;
+#else
+                psInfo.CreateNoWindow = true;
+#endif
             }
 
             psInfo.WorkingDirectory = UnitTestUtilities.GetConfigDir();
+        }
 
-            return psInfo;
+        public void Bounce(int millisDown)
+        {
+            Shutdown();
+            Thread.Sleep(millisDown);
+            p = Process.Start(psInfo);
+            Thread.Sleep(500);
         }
 
         public void Shutdown()
@@ -95,91 +132,45 @@ namespace NATSUnitTests
         }
     }
 
-    class ConditionalObj
-    {
-        Object objLock = new Object();
-        bool completed = false;
-
-        internal void wait(int timeout)
-        {
-            lock (objLock)
-            {
-                if (completed)
-                    return;
-
-                Assert.True(Monitor.Wait(objLock, timeout));
-            }
-        }
-
-        internal void reset()
-        {
-            lock (objLock)
-            {
-                completed = false;
-            }
-        }
-
-        internal void notify()
-        {
-            lock (objLock)
-            {
-                completed = true;
-                Monitor.Pulse(objLock);
-            }
-        }
-    }
-
     class UnitTestUtilities
     {
-        Object mu = new Object();
-        static NATSServer defaultServer = null;
-        Process authServerProcess = null;
+        static UnitTestUtilities()
+        {
+            CleanupExistingServers();
+        }
 
         internal static string GetConfigDir()
         {
+#if NET45
             var codeBaseUrl = new Uri(Assembly.GetExecutingAssembly().CodeBase);
             var codeBasePath = Uri.UnescapeDataString(codeBaseUrl.AbsolutePath);
             var runningDirectory = Path.GetDirectoryName(codeBasePath);
+#else
+            var runningDirectory = AppContext.BaseDirectory + 
+                string.Format("{0}..{0}..{0}..{0}",
+                Path.DirectorySeparatorChar);
+#endif
             return Path.Combine(runningDirectory, "config");
         }
 
-        public void StartDefaultServer()
+        public Options DefaultTestOptions
         {
-            lock (mu)
+            get
             {
-                if (defaultServer == null)
-                {
-                    defaultServer = new NATSServer();
-                }
+                var opts = ConnectionFactory.GetDefaultOptions();
+                opts.Timeout = 10000;
+                return opts;
             }
         }
 
-        public void StopDefaultServer()
+        public IConnection DefaultTestConnection
         {
-            lock (mu)
+            get
             {
-                try
-                {
-                    defaultServer.Shutdown();
-                }
-                catch (Exception) { }
-
-                defaultServer = null;
+                return new ConnectionFactory().CreateConnection(DefaultTestOptions);
             }
         }
-
-        public void bounceDefaultServer(int delayMillis)
-        {
-            StopDefaultServer();
-            Thread.Sleep(delayMillis);
-            StartDefaultServer();
-        }
-
-        public void startAuthServer()
-        {
-            authServerProcess = Process.Start("gnatsd -config auth.conf");
-        }
-        
+       
         internal NATSServer CreateServerOnPort(int p)
         {
             return new NATSServer(p);
@@ -202,16 +193,30 @@ namespace NATSUnitTests
 
         internal static void CleanupExistingServers()
         {
-            try
-            {
-                Process[] procs = Process.GetProcessesByName("gnatsd");
+            Process[] procs = Process.GetProcessesByName("gnatsd");
+            if (procs == null)
+                return;
 
-                foreach (Process proc in procs)
+            foreach (Process proc in procs)
+            {
+                try
                 {
                     proc.Kill();
                 }
+                catch (Exception) { } // ignore
             }
-            catch (Exception) { } // ignore
+
+            // Let the OS cleanup.
+            for (int i = 0; i < 10; i++)
+            {
+                procs = Process.GetProcessesByName("gnatsd");
+                if (procs == null || procs.Length == 0)
+                    break;
+
+                Thread.Sleep(i * 250);
+            }
+
+            Thread.Sleep(250);
         }
     }
 }
